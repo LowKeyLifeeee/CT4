@@ -1,0 +1,7 @@
+# Requirements cho Lab ICMP Flood Analyzer
+# Cài đặt: pip install -r requirements_lab.txt
+
+scapy>=2.5.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+colorama>=0.4.6
