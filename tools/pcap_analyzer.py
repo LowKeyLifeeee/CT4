@@ -9,12 +9,13 @@ import argparse
 import json
 import csv
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 try:
-    from scapy.all import ICMP, IP
+    from scapy.all import ICMP, IP, sniff
     from scapy.utils import PcapReader
     from scapy.layers.inet import IP as ScapyIP
 except ImportError:
@@ -316,27 +317,127 @@ def plot_timeline(records: list, alerts: list, output_path: str):
     print(f"{Fore.GREEN}[+] Biểu đồ PNG → {chart_path}{Style.RESET_ALL}")
 
 
+# ─────────────────── Real-time Engine (Live NIDS) ──────────────────
+class LiveDetector:
+    def __init__(self, threshold: int, window: int):
+        self.threshold = threshold
+        self.window = window
+        self.recent_pkts = []
+        self.last_alert_time = 0
+        self.alert_cooldown = 1.0  # Cooldown 1 giây tránh trôi log console
+        self.total_scanned = 0
+
+    def process_packet(self, pkt):
+        if not (pkt.haslayer(IP) and pkt.haslayer(ICMP)):
+            return
+            
+        ip_layer = pkt[IP]
+        icmp_layer = pkt[ICMP]
+        itype = int(icmp_layer.type)
+        icode = int(icmp_layer.code)
+        
+        # Chỉ quét loại ICMP nguy hiểm
+        if itype not in ICMP_TYPES_OF_INTEREST:
+            return
+            
+        self.total_scanned += 1
+        now = time.time()
+        
+        self.recent_pkts.append({
+            "timestamp": now,
+            "src_ip": ip_layer.src,
+            "dst_ip": ip_layer.dst,
+            "icmp_type": itype,
+            "icmp_code": icode
+        })
+        
+        # Dọn dẹp RAM (Xóa packet nằm ngoài Sliding Window)
+        cutoff = now - self.window
+        self.recent_pkts = [p for p in self.recent_pkts if p["timestamp"] >= cutoff]
+        
+        # Nếu vừa cảnh báo xong, bỏ qua để tránh spam màn hình
+        if now - self.last_alert_time < self.alert_cooldown:
+            return
+            
+        # 1. Phát hiện DDoS (Nhiều IP -> 1 Đích)
+        dst_counts = defaultdict(list)
+        for p in self.recent_pkts:
+            dst_counts[p["dst_ip"]].append(p)
+            
+        for dst_ip, pkts in dst_counts.items():
+            if len(pkts) >= self.threshold * 1.5:
+                unique_srcs = len(set(p["src_ip"] for p in pkts))
+                if unique_srcs > 1:
+                    self._alert("Distributed DoS (DDoS)", dst_ip, f"Multiple ({unique_srcs} Botnet IPs)", len(pkts))
+                    self.last_alert_time = now
+                    return
+                    
+        # 2. Phát hiện DoS (1 Nguồn -> 1 Đích)
+        src_counts = defaultdict(int)
+        target_map = {}
+        for p in self.recent_pkts:
+            src_counts[p["src_ip"]] += 1
+            target_map[p["src_ip"]] = p["dst_ip"]
+            
+        for src_ip, count in src_counts.items():
+            if count >= self.threshold:
+                self._alert("Single-Source DoS", target_map[src_ip], src_ip, count)
+                self.last_alert_time = now
+                return
+
+    def _alert(self, attack_type, target, src, count):
+        dt = datetime.now().strftime("%H:%M:%S")
+        color = Fore.MAGENTA if "DDoS" in attack_type else Fore.YELLOW
+        print(f"\n{color}[!] {dt} | CẢNH BÁO {attack_type.upper()} TRỰC TIẾP!{Style.RESET_ALL}")
+        print(f"    Mục tiêu: {Fore.RED}{target}{Style.RESET_ALL} | Nguồn: {src} | Tốc độ: {Fore.RED}{count} pkt/{self.window}s{Style.RESET_ALL}\a")
+
 # ─────────────────── Main ────────────────────────────────────────
 def main():
     banner()
     parser = argparse.ArgumentParser(
-        description="Phân tích ICMP Flood từ file Wireshark PCAP",
+        description="Phân tích ICMP Flood (Hỗ trợ Offline PCAP và Real-time Sniffing)",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("pcap", help="Đường dẫn file .pcap hoặc .pcapng")
+    parser.add_argument("pcap", nargs="?", help="Đường dẫn file .pcap (Bỏ qua nếu dùng --live)")
+    parser.add_argument("--live", action="store_true", help="Kích hoạt chế độ Real-time Sniffing trực tiếp từ Card mạng")
+    parser.add_argument("-i", "--interface", help="Card mạng để sniff (VD: eth0, Wi-Fi). Mặc định: Bắt tất cả")
     parser.add_argument("-t", "--threshold", type=int, default=DEFAULT_THRESHOLD,
                         help=f"Ngưỡng packets/giây (mặc định: {DEFAULT_THRESHOLD})")
     parser.add_argument("-w", "--window", type=int, default=DEFAULT_WINDOW_SEC,
                         help=f"Cửa sổ thời gian (giây, mặc định: {DEFAULT_WINDOW_SEC})")
     parser.add_argument("-o", "--output", default="report",
                         help="Tên file output (không cần extension, mặc định: report)")
-    parser.add_argument("--csv",   action="store_true", help="Xuất CSV")
-    parser.add_argument("--json",  action="store_true", help="Xuất JSON")
-    parser.add_argument("--chart", action="store_true", help="Vẽ biểu đồ PNG")
-    parser.add_argument("--all",   action="store_true", help="Xuất tất cả định dạng")
+    parser.add_argument("--csv",   action="store_true", help="Xuất CSV (Chỉ áp dụng Offline)")
+    parser.add_argument("--json",  action="store_true", help="Xuất JSON (Chỉ áp dụng Offline)")
+    parser.add_argument("--chart", action="store_true", help="Vẽ biểu đồ PNG (Chỉ áp dụng Offline)")
+    parser.add_argument("--all",   action="store_true", help="Xuất tất cả định dạng (Chỉ áp dụng Offline)")
     args = parser.parse_args()
 
-    # 1. Load PCAP
+    # 1. Chế độ Real-time (LIVE NIDS)
+    if args.live:
+        print(f"{Fore.CYAN}[*] KHỞI ĐỘNG CHẾ ĐỘ REAL-TIME (LIVE NIDS){Style.RESET_ALL}")
+        print(f"    Ngưỡng phát hiện: {args.threshold} pkt / {args.window}s")
+        if args.interface:
+            print(f"    Lắng nghe trên card: {args.interface}")
+        else:
+            print(f"    Lắng nghe trên TẤT CẢ card mạng")
+        print(f"{Fore.YELLOW}[!] Bấm Ctrl+C để dừng giám sát...{Style.RESET_ALL}\n")
+        
+        detector = LiveDetector(args.threshold, args.window)
+        try:
+            # Tham số store=False đảm bảo RAM không bị đầy khi chạy liên tục ngày qua ngày
+            sniff(iface=args.interface, filter="icmp", prn=detector.process_packet, store=False)
+        except KeyboardInterrupt:
+            print(f"\n{Fore.GREEN}[+] Đã dừng hệ thống. Tổng số gói ICMP rủi ro quét qua: {detector.total_scanned}{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"\n{Fore.RED}[ERROR] Lỗi Sniffing (Yêu cầu chạy script bằng quyền Admin/Root): {e}{Style.RESET_ALL}")
+        sys.exit(0)
+
+    # 2. Chế độ Offline PCAP
+    if not args.pcap:
+        parser.print_help()
+        sys.exit(1)
+
     records = load_pcap(args.pcap)
     if not records:
         print(f"{Fore.YELLOW}[!] Không tìm thấy packet ICMP Type 3/4/7 nào{Style.RESET_ALL}")

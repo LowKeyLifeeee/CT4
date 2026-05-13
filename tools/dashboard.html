@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIDS | Live Monitor</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --bg-panel: #161b22;
+            --text: #c9d1d9;
+            --accent: #58a6ff;
+            --danger: #f85149;
+            --success: #3fb950;
+            --warning: #d29922;
+            --border: #30363d;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Consolas', 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            color: var(--accent);
+            text-align: center;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 10px;
+            margin-top: 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 15px;
+            flex: 1;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #8b949e;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .stat-card .value.danger { color: var(--danger); }
+        .stat-card .value.success { color: var(--success); }
+
+        .dashboard-main {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel h2 {
+            margin-top: 0;
+            font-size: 16px;
+            color: #8b949e;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .packet-stream {
+            flex: 2;
+        }
+
+        .alert-history {
+            flex: 1;
+        }
+
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+
+        .pkt-row {
+            padding: 4px 0;
+            border-bottom: 1px solid #21262d;
+            display: flex;
+            gap: 10px;
+        }
+
+        .pkt-row.malicious {
+            color: var(--danger);
+            background-color: rgba(248, 81, 73, 0.1);
+            font-weight: bold;
+        }
+
+        .pkt-time { color: #8b949e; width: 90px; }
+        .pkt-src { color: var(--text); width: 130px; }
+        .pkt-dst { color: var(--text); width: 130px; }
+        .pkt-info { color: var(--accent); }
+        
+        .pkt-row.malicious .pkt-time,
+        .pkt-row.malicious .pkt-src,
+        .pkt-row.malicious .pkt-dst,
+        .pkt-row.malicious .pkt-info {
+            color: var(--danger);
+        }
+
+        .alert-card {
+            border-left: 4px solid var(--danger);
+            background: rgba(248, 81, 73, 0.1);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+            animation: flash 1s ease-out;
+        }
+
+        .alert-title {
+            color: var(--danger);
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        @keyframes flash {
+            0% { background: rgba(248, 81, 73, 0.5); }
+            100% { background: rgba(248, 81, 73, 0.1); }
+        }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+    </style>
+</head>
+<body>
+
+    <h1>🛡️ NIDS Real-time Dashboard</h1>
+
+    <div class="stats-row">
+        <div class="stat-card">
+            <h3>PACKETS SCANNED</h3>
+            <div class="value" id="val-scanned">0</div>
+        </div>
+        <div class="stat-card">
+            <h3>ACTIVE ALERTS</h3>
+            <div class="value danger" id="val-alerts">0</div>
+        </div>
+        <div class="stat-card">
+            <h3>SYSTEM STATUS</h3>
+            <div class="value success" id="val-status">MONITORING</div>
+        </div>
+    </div>
+
+    <div class="dashboard-main">
+        <div class="panel packet-stream">
+            <h2>LIVE PACKET STREAM</h2>
+            <div class="log-container" id="packet-log">
+                <!-- Packets go here -->
+            </div>
+        </div>
+
+        <div class="panel alert-history">
+            <h2>THREAT DETECTIONS</h2>
+            <div class="log-container" id="alert-log">
+                <!-- Alerts go here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lastDataString = "";
+
+        async function fetchDashboardData() {
+            try {
+                // Fetch trực tiếp từ RAM của Python Server
+                const response = await fetch('dashboard.json');
+                if (!response.ok) return;
+                const data = await response.json();
+                
+                // Thuật toán chống nhấp nháy UI (Chỉ vẽ lại khi có packet mới)
+                const currentDataString = JSON.stringify(data);
+                if (currentDataString === lastDataString) return;
+                lastDataString = currentDataString;
+
+                updateUI(data);
+            } catch (err) {
+                // Bỏ qua lỗi kết nối
+            }
+        }
+
+        function updateUI(data) {
+            document.getElementById('val-scanned').innerText = data.total_scanned;
+            document.getElementById('val-alerts').innerText = data.alert_count;
+            
+            if (data.alert_count > 0) {
+                document.getElementById('val-status').innerText = 'ATTACK DETECTED';
+                document.getElementById('val-status').className = 'value danger';
+            } else {
+                document.getElementById('val-status').innerText = 'SECURE';
+                document.getElementById('val-status').className = 'value success';
+            }
+
+            // Render Packets
+            const pktLog = document.getElementById('packet-log');
+            pktLog.innerHTML = data.packets.map(p => `
+                <div class="pkt-row ${p.malicious ? 'malicious' : ''}">
+                    <span class="pkt-time">[${p.time}]</span>
+                    <span class="pkt-src">${p.src}</span>
+                    <span>→</span>
+                    <span class="pkt-dst">${p.dst}</span>
+                    <span class="pkt-info">${p.malicious ? '[DDoS PAYLOAD]' : ''} ICMP Type ${p.type} Code ${p.code}</span>
+                </div>
+            `).join('');
+            
+            // Cuộn xuống cuối
+            pktLog.scrollTop = pktLog.scrollHeight;
+
+            // Render Alerts
+            const alertLog = document.getElementById('alert-log');
+            alertLog.innerHTML = data.alerts.slice().reverse().map(a => `
+                <div class="alert-card">
+                    <div class="alert-title">⚠ ${a.type}</div>
+                    <div style="font-size: 12px; margin-top: 4px;">
+                        <div><strong>Target:</strong> ${a.target}</div>
+                        <div><strong>Source:</strong> ${a.src}</div>
+                        <div><strong>Rate:</strong> ${a.pps} pkt/s</div>
+                        <div style="color: #8b949e; margin-top: 4px;">[${a.time}]</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Cập nhật mỗi 500ms
+        setInterval(fetchDashboardData, 500);
+    </script>
+</body>
+</html>
