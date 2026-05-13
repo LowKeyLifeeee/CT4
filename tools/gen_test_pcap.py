@@ -59,9 +59,21 @@ for i in range(120):
     pkt.time = type4_start + (i * 0.008)   # 125 pkt/s
     packets.append(pkt)
 
-# ── 4. Traffic trở lại bình thường sau flood ──
+# ── 4. Tấn công DDoS Phân tán / Botnet (Nhiều IP cùng đánh) ──
+print("    [+] Sinh DDoS / Botnet attack (300 pkt/s, 4 giây, từ 50 IP khác nhau)...")
+ddos_start = base_time + 13.0
+for i in range(1200):
+    bot_ip = f"113.190.{random.randint(1, 254)}.{random.randint(1, 254)}"
+    pkt = (
+        IP(src=bot_ip, dst=VICTIM_IP) /
+        ICMP(type=3, code=4)
+    )
+    pkt.time = ddos_start + (i * 0.0033)   # 300 pkt/s phân tán
+    packets.append(pkt)
+
+# ── 5. Traffic trở lại bình thường sau flood ──
 print("    [+] Sinh post-attack traffic...")
-recovery_start = base_time + 12.0
+recovery_start = base_time + 18.0
 for i in range(30):
     src = random.choice(NORMAL_IPS)
     pkt = (
