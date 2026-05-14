@@ -1,7 +1,7 @@
 # 🛡️ Real-time ICMP Flood Detector (DDoS Monitor)
 
 Đây là một công cụ phát hiện tấn công DDoS (chủ yếu là ICMP Flood / Ping Flood) theo thời gian thực dành cho hệ điều hành Windows. Công cụ sử dụng `TShark` (chương trình dòng lệnh đi kèm Wireshark) để bắt và phân tích luồng mạng ở tốc độ cao.
-
+Báo cáo được viết trong tools/LAB_REPORT.md
 ## ✨ Tính năng chính
 - **Quét Real-time:** Đọc luồng mạng và phân tích gói tin trực tiếp mà không bị gián đoạn.
 - **Tự động bắt quyền:** Tự động gọi màn hình cấp quyền Quản trị viên (Administrator).
