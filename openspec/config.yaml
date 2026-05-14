@@ -1,20 +1,19 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Bối cảnh hiển thị cho AI khi dùng OpenSpec CLI / skill (tùy phiên bản openspec)
+context: |
+  Repo: CT4 — lab an toàn mạng (ICMP flood). Mã chính: tools/pcap_analyzer.py, tools/gen_test_pcap.py.
+  Stack: Python 3.10+, Scapy, pandas (tùy chọn), matplotlib (tùy chọn), colorama (tùy chọn).
+  Quy ước: chỉ sửa file liên quan tác vụ; giữ style argparse và comment tiếng Việt/Anh như file hiện có.
+  Báo cáo lab: tools/LAB_REPORT.md; OpenSpec change: openspec/changes/pcap-icmp-flood-analyzer/.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+# Gợi ý quy tắc theo artifact (OpenSpec có thể đọc — giữ ngắn, ưu tiên prompt rõ)
+rules:
+  proposal:
+    - Luôn có mục Non-goals / Phạm vi ngoài
+    - Nêu rõ file và capability map với specs
+  design:
+    - Có sơ đồ luồng dữ liệu và bảng tham số CLI
+    - Mỗi thành phần kiến trúc kèm "Prompt AI" copy được
+  tasks:
+    - Mỗi task có checkbox, đường dẫn file, và khối PROMPT cho agent
